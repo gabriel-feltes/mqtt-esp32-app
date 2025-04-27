@@ -1,0 +1,13 @@
+{
+  "files": {
+    "main.css": "/mqtt-esp32-app/static/css/main.4bb477a5.css",
+    "main.js": "/mqtt-esp32-app/static/js/main.536db0d2.js",
+    "index.html": "/mqtt-esp32-app/index.html",
+    "main.4bb477a5.css.map": "/mqtt-esp32-app/static/css/main.4bb477a5.css.map",
+    "main.536db0d2.js.map": "/mqtt-esp32-app/static/js/main.536db0d2.js.map"
+  },
+  "entrypoints": [
+    "static/css/main.4bb477a5.css",
+    "static/js/main.536db0d2.js"
+  ]
+}
