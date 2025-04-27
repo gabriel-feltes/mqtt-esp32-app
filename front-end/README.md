@@ -1,6 +1,6 @@
 # Aplicativo de Controle ESP32 via MQTT - Documentação Técnica
 
-## 🌳 Estrutura de Arquivos
+## 🌳 Listagem dos arquivos feitos para edição direta
 
 ```bash
 mqtt-esp32-app/
@@ -10,19 +10,15 @@ mqtt-esp32-app/
 │   ├── index.html          # Template HTML principal
 │   ├── logo192.png         # Logo 192x192
 │   ├── logo512.png         # Logo 512x512
-│   ├── manifest.json       # Configuração PWA
-│   └── robots.txt          # Instruções para robôs de busca
+│   └── manifest.json       # Configuração PWA
 └── src/                    # Código-fonte do aplicativo
     ├── App.css             # Estilos do componente principal
     ├── App.js              # Componente principal da aplicação
-    ├── App.test.js         # Testes do componente App
     ├── index.css           # Estilos globais
     ├── index.js            # Ponto de entrada do React
     ├── Login.js            # Componente de autenticação
-    ├── logo.svg            # Logo em formato SVG
-    ├── mqttService.js      # Serviço de conexão MQTT
-    ├── reportWebVitals.js  # Métricas de performance
-    └── setupTests.js       # Configuração dos testes
+    └── mqttService.js      # Serviço de conexão MQTT
+  
 ```
 
 ## 🛠️ Componentes Principais

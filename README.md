@@ -4,7 +4,8 @@ Este protótipo inicial foi projetado para controlar o LED embutido no ESP32, pe
 
 A partir deste exemplo, é possível estender facilmente o projeto para integrar outros sensores e atuadores, como sensores de temperatura, umidade, ou até mesmo controlar dispositivos externos.
 
-> **Nota:** Este tutorial foi desenvolvido e testado exclusivamente no sistema operacional **Ubuntu**. Caso utilize outro sistema, será necessário adaptar os comandos e configurações conforme as especificidades do seu ambiente.
+> [!NOTE]
+> Este tutorial foi desenvolvido e testado exclusivamente no sistema operacional **Ubuntu**. Caso utilize outro sistema, será necessário adaptar os comandos e configurações conforme as especificidades do seu ambiente.
 
 ## 1. Criar Conta no EMQX Cloud
 
@@ -636,6 +637,7 @@ Isso permite que você controle o LED do seu ESP32 de qualquer lugar do mundo, d
 ![Controle do LED via MQTT](images/controle-led.png)
 Agora, você pode controlar o LED do seu ESP32 de qualquer lugar do mundo, desde que tenha acesso à internet. Clique nos botões para ligar e desligar o LED. Você verá as mensagens de log no terminal do ESP32 refletindo as ações realizadas.
 
-#### Caso queira criar um aplicativo, use o código acima como base. [`Aqui está`](https://gabriel-feltes.github.io/esp32-mqtt-app/) o site com o front-end pronto para você testar o controle do LED via MQTT
+#### Caso queira criar um aplicativo, use o código acima como base. [`Aqui está`](https://gabriel-feltes.github.io/mqtt-esp32-app/) o site com o front-end pronto para você testar o controle do LED via MQTT
 
-> **Nota:** O aplicativo vai pedir o `AUTH_USERNAME` e `AUTH_PASSWORD` para conectar ao broker MQTT, além dos caracteres `********` que devem ser substituídos pelo ID do seu deployment.
+> [!IMPORTANT]  
+> O aplicativo solicitará o `AUTH_USERNAME` e `AUTH_PASSWORD` para conectar ao broker MQTT. Além disso, os caracteres `********` devem ser substituídos pelo ID do seu deployment.
