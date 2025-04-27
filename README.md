@@ -635,6 +635,7 @@ Isso permite que você controle o LED do seu ESP32 de qualquer lugar do mundo, d
 `Salve o arquivo como index.html e abra-o no seu navegador.`
 
 ![Controle do LED via MQTT](images/controle-led.png)
+
 Agora, você pode controlar o LED do seu ESP32 de qualquer lugar do mundo, desde que tenha acesso à internet. Clique nos botões para ligar e desligar o LED. Você verá as mensagens de log no terminal do ESP32 refletindo as ações realizadas.
 
 #### Caso queira criar um aplicativo, use o código acima como base. [`Aqui está`](https://gabriel-feltes.github.io/mqtt-esp32-app/) o site com o front-end pronto para você testar o controle do LED via MQTT
