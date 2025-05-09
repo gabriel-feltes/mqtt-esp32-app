@@ -1,5 +1,7 @@
 # Aplicativo de Controle ESP32 via MQTT - Documentação Técnica
 
+> **Nota:** Este front-end está [**`publicado e acessível`**](https://gabriel-feltes.github.io/mqtt-esp32-app/) para conexão direta com o LED embutido do seu ESP32 via plataforma EMQX. Basta fornecer seu `Deployment ID` e os dados do seu cliente MQTT criado no seu `Deployment`: `Usuário` e `Senha`
+
 ## 🌳 Listagem dos arquivos feitos para edição direta
 
 ```bash
