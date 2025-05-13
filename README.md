@@ -98,6 +98,7 @@ fi
 EOF
 
 source ~/.bashrc
+exit
 ```
 
 Após executar o comando acima, o ambiente ESP-IDF será ativado automaticamente sempre que você navegar para a pasta `esp32` ou suas subpastas no terminal.
