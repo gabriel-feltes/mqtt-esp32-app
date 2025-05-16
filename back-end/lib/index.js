@@ -2,13 +2,17 @@ import mqtt from 'mqtt';
 import { insertLog } from './logger.js';
 import 'dotenv/config';
 
-// Pegando as variáveis do ambiente (.env ou Railway)
+// Variáveis de ambiente
 const MQTT_BROKER_URL = process.env.MQTT_BROKER_URL;
 const MQTT_USERNAME = process.env.MQTT_USERNAME;
 const MQTT_PASSWORD = process.env.MQTT_PASSWORD;
-const MQTT_TOPIC = process.env.MQTT_TOPIC || '#'; // padrão se não definido
+const MQTT_TOPICS = process.env.MQTT_TOPICS?.split(',') || [];
 
-// Conectar ao broker MQTT
+if (!MQTT_BROKER_URL || !MQTT_USERNAME || !MQTT_PASSWORD || MQTT_TOPICS.length === 0) {
+  throw new Error('❌ Verifique as variáveis de ambiente MQTT_BROKER_URL, MQTT_USERNAME, MQTT_PASSWORD e MQTT_TOPICS');
+}
+
+// Conexão com o broker MQTT
 const client = mqtt.connect(MQTT_BROKER_URL, {
   username: MQTT_USERNAME,
   password: MQTT_PASSWORD,
@@ -18,9 +22,14 @@ const client = mqtt.connect(MQTT_BROKER_URL, {
 
 client.on('connect', () => {
   console.log('✅ Conectado ao broker MQTT');
-  client.subscribe(MQTT_TOPIC, (err) => {
-    if (err) console.error('Erro ao se inscrever no tópico:', err);
-    else console.log(`📡 Inscrito no tópico: ${MQTT_TOPIC}`);
+
+  client.subscribe(MQTT_TOPICS, (err, granted) => {
+    if (err) {
+      console.error('❌ Erro ao se inscrever nos tópicos:', err);
+    } else {
+      const subs = granted.map(g => g.topic).join(', ');
+      console.log(`📡 Inscrito nos tópicos: ${subs}`);
+    }
   });
 });
 
@@ -37,7 +46,7 @@ client.on('message', async (topic, message) => {
 });
 
 client.on('error', (err) => {
-  console.error('Erro na conexão MQTT:', err.message);
+  console.error('❌ Erro na conexão MQTT:', err.message);
 });
 
 client.on('close', () => {

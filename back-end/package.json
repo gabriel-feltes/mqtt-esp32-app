@@ -4,7 +4,10 @@
   "type": "module",
   "main": "lib/index.js",
   "scripts": {
-    "start": "node lib/index.js"
+    "start": "node lib/server.js"
+  },
+  "engines": {
+    "node": ">=18"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.39.5",
