@@ -1,8 +1,14 @@
 {
-  "name": "mqtt-backend",
+  "name": "mqtt-esp32-backend",
   "version": "1.0.0",
   "type": "module",
+  "main": "lib/index.js",
+  "scripts": {
+    "start": "node lib/index.js"
+  },
   "dependencies": {
-    "@supabase/supabase-js": "^2.0.0"
+    "@supabase/supabase-js": "^2.39.5",
+    "dotenv": "^16.5.0",
+    "mqtt": "^5.0.0"
   }
 }

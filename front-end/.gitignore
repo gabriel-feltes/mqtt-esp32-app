@@ -1,0 +1,8 @@
+# Ignorar dependências
+node_modules/
+
+# Ignorar lockfile do npm (se não quiser versionar)
+package-lock.json
+
+# Ignorar pasta de build
+build/
