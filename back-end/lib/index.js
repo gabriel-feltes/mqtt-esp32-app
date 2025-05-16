@@ -1,5 +1,6 @@
 import mqtt from 'mqtt';
 import { insertLog } from './logger.js';
+import 'dotenv/config';
 
 // Pegando as variáveis do ambiente (.env ou Railway)
 const MQTT_BROKER_URL = process.env.MQTT_BROKER_URL;
