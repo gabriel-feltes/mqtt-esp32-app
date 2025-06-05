@@ -58,7 +58,7 @@ safe-buffer/index.js:
  */
 
 /**
- * react-router v7.6.0
+ * react-router v7.6.2
  *
  * Copyright (c) Remix Software Inc.
  *
