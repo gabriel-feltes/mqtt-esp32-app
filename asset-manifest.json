@@ -1,13 +1,13 @@
 {
   "files": {
     "main.css": "/mqtt-esp32-app/static/css/main.4bb477a5.css",
-    "main.js": "/mqtt-esp32-app/static/js/main.51325965.js",
+    "main.js": "/mqtt-esp32-app/static/js/main.22cb2f6a.js",
     "index.html": "/mqtt-esp32-app/index.html",
     "main.4bb477a5.css.map": "/mqtt-esp32-app/static/css/main.4bb477a5.css.map",
-    "main.51325965.js.map": "/mqtt-esp32-app/static/js/main.51325965.js.map"
+    "main.22cb2f6a.js.map": "/mqtt-esp32-app/static/js/main.22cb2f6a.js.map"
   },
   "entrypoints": [
     "static/css/main.4bb477a5.css",
-    "static/js/main.51325965.js"
+    "static/js/main.22cb2f6a.js"
   ]
 }
