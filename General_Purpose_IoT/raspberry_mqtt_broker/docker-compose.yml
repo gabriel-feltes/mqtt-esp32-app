@@ -1,0 +1,7 @@
+services:
+  mqtt_listener:
+    build: .
+    container_name: mqtt_listener
+    env_file: .env
+    restart: unless-stopped
+    network_mode: "host"

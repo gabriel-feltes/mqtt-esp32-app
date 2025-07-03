@@ -1,0 +1,48 @@
+# ======================================================
+# --- ARQUIVOS DE CONFIGURAÇÃO E SEGREDOS ---
+# Ignora arquivos de configuração e credenciais em QUALQUER subpasta.
+# ======================================================
+**/sdkconfig
+**/sdkconfig.defaults
+**/sdkconfig.ci
+**/main/credentials.h
+**/.env*
+
+# ======================================================
+# --- CERTIFICADOS E CHAVES PRIVADAS ---
+# Ignora arquivos de certificado em QUALQU-ER subpasta.
+# ======================================================
+**/*.crt
+**/*.pem
+**/*.key
+**/*.der
+
+# ======================================================
+# --- ARQUIVOS DE COMPILAÇÃO E DEPENDÊNCIAS ---
+# Ignora a pasta de build e binários em QUALQUER subpasta.
+# ======================================================
+**/build/
+**/dependencies/
+*.bin
+*.elf
+*.map
+
+# ======================================================
+# --- ARQUIVOS DE TESTES DE EXEMPLOS ---
+# ======================================================
+**/pytest_*.py
+
+# ======================================================
+# --- ARQUIVOS DE IDE E SISTEMA ---
+# Geralmente ignorados a partir da raiz.
+# ======================================================
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.visualgdb/
+
+# Arquivos temporários e de sistema
+*~
+.DS_Store
+Thumbs.db
