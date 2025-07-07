@@ -26,7 +26,7 @@ static const char *TAG_MQ135 = "MQ135";
 static const char *TAG_LIGHT_SENSOR = "LDR_SENSOR";
 
 // Variável global para o sensor MQ-135
-float R0;   // Resistência do sensor em ar limpo (calculada)
+float R0 = 10.55;   // Resistência do sensor em ar limpo (calculada)
 
 // Handles globais
 esp_mqtt_client_handle_t client;
@@ -44,6 +44,7 @@ static float calculate_sea_level_pressure(float pressure, float temperature, flo
     return sea_level_pressure;
 }
 
+/*
 // Função para calibrar o sensor MQ-135 e calcular R0
 static void calibrate_mq135() {
     ESP_LOGI(TAG_MQ135, "[%s] Calibrando sensor MQ-135 para obter R0...", DEVICE_ID);
@@ -78,6 +79,7 @@ static void calibrate_mq135() {
     ESP_LOGI(TAG_MQ135, "[%s] Valor de RS = %.2f", DEVICE_ID, RS_air);
     ESP_LOGI(TAG_MQ135, "[%s] Valor de R0 = %.2f", DEVICE_ID, R0);
 }
+*/
 
 static void heartbeat_task(void *pvParameters) {
     while (1) {
@@ -148,7 +150,7 @@ static void mq135_read_task(void *pvParameters) {
             if (adc_oneshot_read(adc1_handle, MQ135_ADC_CHANNEL, &adc_reading) == ESP_OK) {
                 // Cálculo da resistência do sensor (Rs)
                 if (adc_reading > 0) {
-                    Rs = (MQ135_REF_VOLTAGE * ADC_RESOLUTION_11_BITS / adc_reading) - MQ135_REF_VOLTAGE;
+                    Rs = (MQ135_REF_VOLTAGE * ADC_RESOLUTION_12_BITS / adc_reading) - MQ135_REF_VOLTAGE;
                 } else {
                     ESP_LOGE(TAG_MQ135, "[%s] Erro: Leitura do sensor inválida!", DEVICE_ID);
                     Rs = 0;
@@ -327,7 +329,7 @@ void app_main(void) {
     init_bmp280(); 
     adc_init_all();
     dht11_init_sensor();
-    calibrate_mq135(); // Calibra o sensor MQ-135 ao iniciar
+    //calibrate_mq135(); // Calibra o sensor MQ-135 ao iniciar
 
     wifi_init_sta();
 

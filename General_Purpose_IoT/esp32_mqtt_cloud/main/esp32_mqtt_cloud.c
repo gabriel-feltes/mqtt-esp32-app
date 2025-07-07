@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
@@ -11,93 +12,114 @@
 #include "esp_event.h"
 #include "esp_netif.h"
 
-#include "board_config.h"
 #include "credentials.h"
+#include "board_config.h"
 
 // --- Constantes e Variáveis Globais ---
-static const char *TAG = "DUAL_MQTT_APP";
-#define NVS_NAMESPACE "storage"
-#define NVS_STATE_KEY "gpio_state"
+static const char *TAG = "GENERIC_MQTT_APP";
 
 esp_mqtt_client_handle_t cloud_client = NULL;
 esp_mqtt_client_handle_t local_client = NULL;
 TaskHandle_t heartbeat_task_handle = NULL;
 static bool cloud_mqtt_connected = false;
-static uint8_t g_gpio_state = 0; // Estado global do GPIO (0=OFF, 1=ON)
 
 // Referência ao certificado da nuvem
 extern const uint8_t emqxsl_ca_crt_start[] asm("_binary_emqxsl_ca_crt_start");
 extern const uint8_t emqxsl_ca_crt_end[]   asm("_binary_emqxsl_ca_crt_end");
 
-// --- Funções de Persistência (NVS) ---
+// --- Funções de Persistência (NVS) para Múltiplos Pinos ---
 
-/**
- * @brief Salva o estado do GPIO no NVS.
- * @param state O estado a ser salvo (0 para OFF, 1 para ON).
- */
-static void save_gpio_state(uint8_t state) {
+static void save_gpio_state(int gpio_num, uint8_t state) {
     nvs_handle_t nvs_handle;
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Erro ao abrir o NVS para escrita (%s)", esp_err_to_name(err));
         return;
     }
-
-    err = nvs_set_u8(nvs_handle, NVS_STATE_KEY, state);
+    char key[20];
+    snprintf(key, sizeof(key), NVS_STATE_KEY_FORMAT, gpio_num);
+    err = nvs_set_u8(nvs_handle, key, state);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Erro ao salvar estado no NVS (%s)", esp_err_to_name(err));
+        ESP_LOGE(TAG, "Erro ao salvar estado para GPIO %d no NVS (%s)", gpio_num, esp_err_to_name(err));
     } else {
-        ESP_LOGI(TAG, "Estado do GPIO (%s) salvo no NVS.", state == 1 ? "ON" : "OFF");
+        ESP_LOGI(TAG, "Estado do GPIO %d (%s) salvo no NVS.", gpio_num, state == 1 ? "ON" : "OFF");
     }
-
-    err = nvs_commit(nvs_handle);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Erro ao comitar NVS (%s)", esp_err_to_name(err));
-    }
-
+    nvs_commit(nvs_handle);
     nvs_close(nvs_handle);
-    g_gpio_state = state; // Atualiza a variável global
 }
 
-/**
- * @brief Carrega o estado do GPIO do NVS.
- * @return O estado carregado (0 para OFF, 1 para ON). Retorna 0 (OFF) se não houver estado salvo.
- */
-static uint8_t load_gpio_state(void) {
+static uint8_t load_gpio_state(int gpio_num) {
     nvs_handle_t nvs_handle;
-    uint8_t state = 0; // Padrão é OFF
-
+    uint8_t state = 0; // Estado padrão: OFF
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs_handle);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Erro ao abrir o NVS para leitura (%s)", esp_err_to_name(err));
-        return state; // Retorna o padrão
+        return state;
     }
-
-    err = nvs_get_u8(nvs_handle, NVS_STATE_KEY, &state);
-    switch (err) {
-        case ESP_OK:
-            ESP_LOGI(TAG, "Estado anterior carregado do NVS: %s", state == 1 ? "ON" : "OFF");
-            break;
-        case ESP_ERR_NVS_NOT_FOUND:
-            ESP_LOGI(TAG, "Nenhum estado anterior encontrado no NVS. Usando padrão (OFF).");
-            // O estado já é 0 (padrão), então não fazemos nada.
-            break;
-        default:
-            ESP_LOGE(TAG, "Erro ao ler o NVS (%s)", esp_err_to_name(err));
+    char key[20];
+    snprintf(key, sizeof(key), NVS_STATE_KEY_FORMAT, gpio_num);
+    err = nvs_get_u8(nvs_handle, key, &state);
+    if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGE(TAG, "Erro ao ler NVS para GPIO %d (%s)", gpio_num, esp_err_to_name(err));
+    } else if (err == ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGI(TAG, "Estado não encontrado para GPIO %d, usando padrão (%s)", gpio_num, state ? "ON" : "OFF");
     }
-
     nvs_close(nvs_handle);
-    g_gpio_state = state; // Atualiza a variável global
     return state;
 }
 
-// --- Tarefa de Heartbeat (só publica na NUVEM) ---
+// --- Funções de Controle e Publicação ---
+
+void update_and_publish_state(int gpio_num, uint8_t new_state) {
+    if (!GPIO_IS_VALID_OUTPUT_GPIO(gpio_num)) {
+        ESP_LOGE(TAG, "GPIO %d não é um pino de saída válido.", gpio_num);
+        return;
+    }
+
+    gpio_reset_pin(gpio_num);
+    gpio_set_direction(gpio_num, GPIO_MODE_OUTPUT);
+    gpio_set_level(gpio_num, new_state);
+    ESP_LOGI(TAG, "GPIO %d set to %s", gpio_num, new_state ? "ON" : "OFF");
+
+    save_gpio_state(gpio_num, new_state);
+
+    char state_topic[64];
+    snprintf(state_topic, sizeof(state_topic), MQTT_GPIO_STATE_TOPIC_FORMAT, gpio_num);
+    const char* state_str = (new_state == 1) ? "ON" : "OFF";
+    int msg_id;
+
+    ESP_LOGI(TAG, "Tentando publicar estado '%s' para GPIO %d em '%s'", state_str, gpio_num, state_topic);
+
+    if (cloud_client && cloud_mqtt_connected) {
+        msg_id = esp_mqtt_client_publish(cloud_client, state_topic, state_str, 0, 1, 1);
+        if (msg_id != -1) {
+            ESP_LOGI(TAG, "Estado publicado para o broker da NUVEM, msg_id=%d", msg_id);
+        } else {
+            ESP_LOGE(TAG, "FALHA ao publicar estado para o broker da NUVEM.");
+        }
+    }
+    
+    if (local_client) {
+        msg_id = esp_mqtt_client_publish(local_client, state_topic, state_str, 0, 1, 1);
+        if (msg_id != -1) {
+            ESP_LOGI(TAG, "Estado publicado para o broker LOCAL, msg_id=%d", msg_id);
+        } else {
+            ESP_LOGE(TAG, "FALHA ao publicar estado para o broker LOCAL.");
+        }
+    }
+}
+
+// --- Tarefa de Heartbeat ---
 static void heartbeat_task(void *pvParameters) {
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(HEARTBEAT_INTERVAL_MS));
-        if (cloud_mqtt_connected && cloud_client) {
-            esp_mqtt_client_publish(cloud_client, MQTT_CLOUD_STATUS_TOPIC, "heartbeat", 0, 0, 0);
-            ESP_LOGI(TAG, "Heartbeat enviado para a NUVEM.");
+        if (local_client) {
+            int msg_id = esp_mqtt_client_publish(local_client, MQTT_SYSTEM_STATUS_TOPIC, "heartbeat", 0, 0, 0);
+            if (msg_id != -1) {
+                ESP_LOGI(TAG, "Heartbeat publicado para o broker LOCAL, msg_id=%d", msg_id);
+            } else {
+                ESP_LOGE(TAG, "FALHA ao publicar heartbeat para o broker LOCAL.");
+            }
         }
     }
 }
@@ -107,10 +129,6 @@ static void local_mqtt_event_handler(void *handler_args, esp_event_base_t base, 
     switch ((esp_mqtt_event_id_t)event_id) {
         case MQTT_EVENT_CONNECTED:
             ESP_LOGI(TAG, "Cliente LOCAL conectado.");
-            // Publica o estado ATUAL do GPIO ao se conectar
-            const char* current_state_str = (g_gpio_state == 1) ? "ON" : "OFF";
-            esp_mqtt_client_publish(local_client, MQTT_LOCAL_STATE_TOPIC, current_state_str, 0, 1, 1);
-            ESP_LOGI(TAG, "Publicado estado inicial para o broker LOCAL: %s", current_state_str);
             break;
         case MQTT_EVENT_DISCONNECTED:
             ESP_LOGW(TAG, "Cliente LOCAL desconectado.");
@@ -125,14 +143,18 @@ static void cloud_mqtt_event_handler(void *handler_args, esp_event_base_t base, 
     esp_mqtt_event_handle_t event = event_data;
     switch ((esp_mqtt_event_id_t)event_id) {
         case MQTT_EVENT_CONNECTED:
-            ESP_LOGI(TAG, "Cliente da NUVEM conectado. Inscrevendo-se em: %s", MQTT_CLOUD_COMMAND_TOPIC);
+            ESP_LOGI(TAG, "Cliente da NUVEM conectado.");
             cloud_mqtt_connected = true;
-            esp_mqtt_client_publish(cloud_client, MQTT_CLOUD_STATUS_TOPIC, "online", 0, 1, 1);
-            esp_mqtt_client_subscribe(cloud_client, MQTT_CLOUD_COMMAND_TOPIC, 0);
+            esp_mqtt_client_publish(cloud_client, MQTT_SYSTEM_STATUS_TOPIC, "online", 0, 1, 1);
+            char command_topic_wildcard[64];
+            snprintf(command_topic_wildcard, sizeof(command_topic_wildcard), "%s+%s", MQTT_GPIO_COMMAND_TOPIC_PREFIX, MQTT_GPIO_COMMAND_TOPIC_SUFFIX);
+            esp_mqtt_client_subscribe(cloud_client, command_topic_wildcard, 1);
+            ESP_LOGI(TAG, "Inscrito em: %s", command_topic_wildcard);
             if (heartbeat_task_handle == NULL) {
                 xTaskCreate(heartbeat_task, "heartbeat_task", 3072, NULL, 5, &heartbeat_task_handle);
             }
             break;
+
         case MQTT_EVENT_DISCONNECTED:
             ESP_LOGW(TAG, "Cliente da NUVEM desconectado.");
             cloud_mqtt_connected = false;
@@ -141,24 +163,34 @@ static void cloud_mqtt_event_handler(void *handler_args, esp_event_base_t base, 
                 heartbeat_task_handle = NULL;
             }
             break;
+
         case MQTT_EVENT_DATA:
-            if (strncmp(event->topic, MQTT_CLOUD_COMMAND_TOPIC, event->topic_len) == 0) {
-                const char* new_state_str = NULL;
-                if (strncmp(event->data, "ON", event->data_len) == 0) {
-                    gpio_set_level(LED_GPIO, 1);
-                    save_gpio_state(1); // <-- SALVA O NOVO ESTADO
-                    new_state_str = "ON";
-                } else if (strncmp(event->data, "OFF", event->data_len) == 0) {
-                    gpio_set_level(LED_GPIO, 0);
-                    save_gpio_state(0); // <-- SALVA O NOVO ESTADO
-                    new_state_str = "OFF";
-                }
-                if (new_state_str && local_client) {
-                    ESP_LOGI(TAG, "Comando '%s' da NUVEM recebido. Reportando para o broker LOCAL.", new_state_str);
-                    esp_mqtt_client_publish(local_client, MQTT_LOCAL_STATE_TOPIC, new_state_str, 0, 1, 1);
+            if (strncmp(event->topic, MQTT_GPIO_COMMAND_TOPIC_PREFIX, strlen(MQTT_GPIO_COMMAND_TOPIC_PREFIX)) == 0) {
+                int pin_number;
+                int items = sscanf(event->topic, MQTT_GPIO_COMMAND_TOPIC_PREFIX "%d" MQTT_GPIO_COMMAND_TOPIC_SUFFIX, &pin_number);
+                if (items == 1) {
+                    ESP_LOGI(TAG, "Comando recebido para o pino: %d", pin_number);
+                    if (!GPIO_IS_VALID_OUTPUT_GPIO(pin_number)) {
+                        ESP_LOGE(TAG, "GPIO %d não é um pino de saída válido.", pin_number);
+                        return;
+                    }
+                    uint8_t current_state = gpio_get_level(pin_number);
+                    uint8_t new_state = current_state;
+                    if (strncmp(event->data, "ON", event->data_len) == 0) {
+                        new_state = 1;
+                    } else if (strncmp(event->data, "OFF", event->data_len) == 0) {
+                        new_state = 0;
+                    } else if (strncmp(event->data, "TOGGLE", event->data_len) == 0) {
+                        new_state = !current_state;
+                    } else {
+                        ESP_LOGW(TAG, "Comando desconhecido: %.*s", event->data_len, event->data);
+                        return;
+                    }
+                    update_and_publish_state(pin_number, new_state);
                 }
             }
             break;
+            
         default:
             break;
     }
@@ -183,7 +215,7 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t e
                     .authentication.password = MQTT_PASS
                 },
                 .session.last_will = {
-                    .topic = MQTT_CLOUD_STATUS_TOPIC,
+                    .topic = MQTT_SYSTEM_STATUS_TOPIC,
                     .msg = "offline",
                     .qos = 1,
                     .retain = 1
@@ -234,22 +266,30 @@ void wifi_init_sta(void) {
 
 // --- Função Principal ---
 void app_main(void) {
-    // Inicializa o NVS (necessário para WiFi e para nossa lógica)
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-      ESP_ERROR_CHECK(nvs_flash_erase());
-      ret = nvs_flash_init();
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        ret = nvs_flash_init();
     }
     ESP_ERROR_CHECK(ret);
 
-    // Configura o pino GPIO
-    gpio_reset_pin(LED_GPIO);
-    gpio_set_direction(LED_GPIO, GPIO_MODE_OUTPUT);
-    
-    // Carrega o último estado do NVS e o aplica ao pino
-    uint8_t initial_state = load_gpio_state();
-    gpio_set_level(LED_GPIO, initial_state);
+    // Lista de pinos para inicializar
+    int pins[] = {2, 4, 5, 13, 14, 16, 17, 18, 19, 21, 22, 23, 25, 26, 27, 32, 33}; // GPIOs
+    int num_pins = sizeof(pins) / sizeof(pins[0]);
 
-    // Inicia a conexão Wi-Fi (que por sua vez iniciará o MQTT)
+    // Inicializa cada pino
+    for (int i = 0; i < num_pins; i++) {
+        int pin = pins[i];
+        if (!GPIO_IS_VALID_OUTPUT_GPIO(pin)) {
+            ESP_LOGE(TAG, "GPIO %d não é um pino de saída válido.", pin);
+            continue;
+        }
+        uint8_t initial_state = load_gpio_state(pin);
+        gpio_reset_pin(pin);
+        gpio_set_direction(pin, GPIO_MODE_OUTPUT);
+        gpio_set_level(pin, initial_state);
+        ESP_LOGI(TAG, "Estado inicial do GPIO %d definido para %s a partir do NVS.", pin, initial_state ? "ON" : "OFF");
+    }
+
     wifi_init_sta();
 }

@@ -1,30 +1,17 @@
 #ifndef BOARD_CONFIG_H
 #define BOARD_CONFIG_H
 
-// ======================================================
-// --- CONFIGURAÇÃO GERAL DO DISPOSITIVO ---
-// ======================================================
 #define DEVICE_ID "esp32_02"
 
-// ======================================================
-// --- CONFIGURAÇÕES DE PINOS (GPIO) ---
-// ======================================================
-#define LED_GPIO GPIO_NUM_2
-
-// ======================================================
-// --- CONFIGURAÇÕES DE REDE E MQTT (NÃO SENSÍVEIS) ---
-// ======================================================
-
-// Os endereços dos brokers foram movidos para credentials.h
-
-// --- Tópicos do Cliente 1: NUVEM ---
-#define MQTT_CLOUD_COMMAND_TOPIC DEVICE_ID "/gpio/gpio2/command"
-#define MQTT_CLOUD_STATUS_TOPIC  DEVICE_ID "/status"
-
-// --- Tópicos do Cliente 2: LOCAL ---
-#define MQTT_LOCAL_STATE_TOPIC DEVICE_ID "/gpio/gpio2/state"
+// --- Estrutura de Tópicos Genérica ---
+#define MQTT_GPIO_COMMAND_TOPIC_PREFIX   DEVICE_ID "/gpio/"
+#define MQTT_GPIO_COMMAND_TOPIC_SUFFIX   "/set"
+#define MQTT_GPIO_STATE_TOPIC_FORMAT     DEVICE_ID "/gpio/%d/state"
+#define MQTT_SYSTEM_STATUS_TOPIC         DEVICE_ID "/system/status"
 
 // --- Outras Configurações ---
 #define HEARTBEAT_INTERVAL_MS 5000
+#define NVS_NAMESPACE "storage"
+#define NVS_STATE_KEY_FORMAT "gpio_state_%d" 
 
 #endif // BOARD_CONFIG_H

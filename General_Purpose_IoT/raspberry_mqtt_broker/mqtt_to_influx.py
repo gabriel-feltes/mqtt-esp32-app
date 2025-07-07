@@ -5,237 +5,297 @@ import time
 import datetime
 import os
 import logging
+import threading
+import uuid
 from dotenv import load_dotenv
 
-# --- Configuração ---
-# Carrega variáveis de ambiente do arquivo .env
+# --- Configuração do Logging ---
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(threadName)s - %(levelname)s - %(message)s')
+
+# --- Carregando Configurações do Ambiente ---
 load_dotenv()
 
-# Configura o logging para exibir mensagens informativas
-# O formato inclui timestamp, nível do log e a mensagem.
-# logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# --- Classe Principal do Gateway ---
+class IoTGateway:
+    def __init__(self):
+        logging.info("Inicializando o Gateway IoT...")
+        self.load_config()
+        self.influx_client = self.setup_influxdb_client()
+        self.local_mqtt_client = self.setup_local_mqtt_client()
+        self.cloud_mqtt_client = self.setup_cloud_mqtt_client()
 
-# --- Leitura das Configurações do Ambiente ---
-# Determina o perfil de rede ativo (ex: 'HOME' ou 'WORK')
-ACTIVE_NETWORK = os.getenv("ACTIVE_NETWORK", "HOME").upper()
-# logging.info(f"Perfil de rede ativo: {ACTIVE_NETWORK}")
+        if not all([self.influx_client, self.local_mqtt_client, self.cloud_mqtt_client]):
+            raise RuntimeError("Falha ao inicializar um ou mais clientes. Verifique os logs e a configuração.")
 
-# Configurações do Broker MQTT
-MQTT_BROKER_HOST = os.getenv(f"{ACTIVE_NETWORK}_MQTT_BROKER_HOST")
-MQTT_BROKER_PORT = int(os.getenv("MQTT_BROKER_PORT", 1883))
-MQTT_USERNAME = os.getenv("MQTT_USERNAME")
-MQTT_PASSWORD = os.getenv("MQTT_PASSWORD")
+    def load_config(self):
+        """Carrega todas as configurações do arquivo .env"""
+        self.active_network = os.getenv("ACTIVE_NETWORK", "HOME").upper()
+        
+        # MQTT Local
+        self.local_mqtt_host = os.getenv(f"{self.active_network}_MQTT_BROKER_HOST")
+        self.local_mqtt_port = int(os.getenv("MQTT_BROKER_PORT", 1883))
+        self.local_mqtt_user = os.getenv("MQTT_USERNAME")
+        self.local_mqtt_pass = os.getenv("MQTT_PASSWORD")
+        self.local_mqtt_topics = json.loads(os.getenv("MQTT_TOPICS_JSON", '[]'))
 
-# Configurações do InfluxDB
-INFLUXDB_HOST = os.getenv(f"{ACTIVE_NETWORK}_INFLUXDB_HOST")
-INFLUXDB_PORT = int(os.getenv("INFLUXDB_PORT", 8086))
-INFLUXDB_USERNAME = os.getenv("INFLUXDB_USERNAME")
-INFLUXDB_PASSWORD = os.getenv("INFLUXDB_PASSWORD")
-INFLUXDB_DATABASE = os.getenv("INFLUXDB_DATABASE", "esp32_dados")
+        # MQTT Nuvem
+        self.cloud_mqtt_host = os.getenv("CLOUD_MQTT_BROKER_HOST")
+        self.cloud_mqtt_port = int(os.getenv("CLOUD_MQTT_BROKER_PORT", 8883))
+        self.cloud_mqtt_user = os.getenv("CLOUD_MQTT_USERNAME")
+        self.cloud_mqtt_pass = os.getenv("CLOUD_MQTT_PASSWORD")
+        
+        # Tópicos Nuvem
+        self.topic_manage_rules = "sistema/regras/gerenciar"
+        self.topic_list_rules = "sistema/regras/lista"
+        self.topic_dashboard_status = "sistema/dashboard/status"
 
-# Tópicos MQTT para inscrição (suporta wildcards)
-# Exemplo para .env: MQTT_TOPICS_JSON='["esp32_01/#", "esp32_02/#"]'
-try:
-    mqtt_topics_json_str = os.getenv("MQTT_TOPICS_JSON", '[]')
-    # O script se inscreverá em cada tópico desta lista.
-    # Usar wildcards como '#' é recomendado para capturar todas as mensagens de um dispositivo.
-    MQTT_TOPICS = json.loads(mqtt_topics_json_str)
-    # if not MQTT_TOPICS:
-        # logging.warning("MQTT_TOPICS_JSON não está definido ou está vazio. Nenhuma inscrição será feita.")
-except json.JSONDecodeError:
-    # logging.error(f"Falha ao decodificar MQTT_TOPICS_JSON: '{mqtt_topics_json_str}'. Verifique o formato no seu arquivo .env.")
-    MQTT_TOPICS = []
+        # InfluxDB
+        self.influx_host = os.getenv(f"{self.active_network}_INFLUXDB_HOST")
+        self.influx_port = int(os.getenv("INFLUXDB_PORT", 8086))
+        self.influx_user = os.getenv("INFLUXDB_USERNAME")
+        self.influx_pass = os.getenv("INFLUXDB_PASSWORD")
+        self.influx_db = os.getenv("INFLUXDB_DATABASE", "esp32_dados")
 
-# Instância global do cliente InfluxDB
-influx_client_global = None
+        # Arquivo de Regras
+        self.rules_file = "automation_rules.json"
+        self.check_interval = 15
+        self.status_timeout = 15  # Timeout in seconds for device status
 
-def on_connect(client, userdata, flags, rc, properties=None):
-    """Callback executado quando o cliente se conecta ao broker MQTT."""
-    if rc == 0:
-        # logging.info(f"Conectado com sucesso ao Broker MQTT em {MQTT_BROKER_HOST}")
-        if MQTT_TOPICS:
-            # Inscreve-se em todos os tópicos definidos na variável de ambiente
-            subscriptions = [(topic, 0) for topic in MQTT_TOPICS]
-            client.subscribe(subscriptions)
-            # logging.info(f"Inscrito nos tópicos: {MQTT_TOPICS}")
-        # else:
-            # logging.warning("Nenhum tópico MQTT para se inscrever. Verifique sua configuração .env.")
-    # else:
-        # logging.error(f"Falha ao conectar ao Broker MQTT ({MQTT_BROKER_HOST}), código de retorno: {rc}")
+    def setup_influxdb_client(self):
+        """Configura e retorna um cliente InfluxDB."""
+        try:
+            client = InfluxDBClient(
+                host=self.influx_host, port=self.influx_port,
+                username=self.influx_user, password=self.influx_pass,
+                database=self.influx_db
+            )
+            client.create_database(self.influx_db)
+            logging.info("Conexão com InfluxDB estabelecida com sucesso.")
+            return client
+        except Exception as e:
+            logging.critical(f"Falha crítica na configuração do InfluxDB: {e}")
+            return None
 
-def on_message(client, userdata, msg):
-    """
-    Callback executado quando uma mensagem é recebida.
-    Esta função agora verifica se os campos existem antes de adicioná-los.
-    """
-    global influx_client_global
-    if not influx_client_global:
-        # logging.error("Cliente InfluxDB não inicializado. Não é possível gravar dados.")
-        return
+    def setup_local_mqtt_client(self):
+        """Configura e conecta o cliente MQTT para a rede local."""
+        client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
+        client.username_pw_set(self.local_mqtt_user, self.local_mqtt_pass)
+        client.on_connect = self.on_local_connect
+        client.on_message = self.on_local_message
+        try:
+            client.connect(self.local_mqtt_host, self.local_mqtt_port, 60)
+            return client
+        except Exception as e:
+            logging.error(f"Não foi possível conectar ao Broker MQTT LOCAL: {e}")
+            return None
 
-    topic = msg.topic
-    try:
+    def setup_cloud_mqtt_client(self):
+        """Configura e conecta o cliente MQTT para a nuvem."""
+        client = mqtt.Client(client_id=f"CloudManager-{uuid.uuid4()}", callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
+        client.username_pw_set(self.cloud_mqtt_user, self.cloud_mqtt_pass)
+        client.on_connect = self.on_cloud_connect
+        client.on_message = self.on_cloud_message
+        client.tls_set()
+        try:
+            client.connect(self.cloud_mqtt_host, self.cloud_mqtt_port, 60)
+            return client
+        except Exception as e:
+            logging.error(f"Não foi possível conectar ao Broker MQTT da NUVEM: {e}")
+            return None
+
+    def on_local_connect(self, client, userdata, flags, rc, properties=None):
+        if rc == 0:
+            logging.info(f"Conectado ao Broker MQTT LOCAL.")
+            if self.local_mqtt_topics:
+                subscriptions = [(topic, 0) for topic in self.local_mqtt_topics]
+                client.subscribe(subscriptions)
+                logging.info(f"Inscrito nos tópicos locais: {self.local_mqtt_topics}")
+        else:
+            logging.error(f"Falha ao conectar ao Broker MQTT LOCAL, código: {rc}")
+
+    def on_cloud_connect(self, client, userdata, flags, rc, properties=None):
+        if rc == 0:
+            logging.info(f"Conectado ao Broker MQTT da NUVEM.")
+            client.subscribe(self.topic_manage_rules)
+            logging.info(f"Inscrito no tópico de gerenciamento: {self.topic_manage_rules}")
+        else:
+            logging.error(f"Falha ao conectar ao Broker da NUVEM, código: {rc}")
+
+    def on_local_message(self, client, userdata, msg):
+        """Processa mensagens da rede local (sensores) e grava no InfluxDB."""
+        topic = msg.topic
         payload_str = msg.payload.decode('utf-8')
-    except UnicodeDecodeError:
-        # logging.warning(f"Não foi possível decodificar o payload para o tópico {topic}. Pode não ser UTF-8.")
-        return
 
-    # logging.debug(f"Mensagem recebida - Tópico: {topic}, Payload: {payload_str}")
+        try:
+            topic_parts = topic.split('/')
+            device_id = topic_parts[0]
+            tags, fields, measurement_name = {"device_id": device_id}, {}, None
+            
+            try: 
+                data = json.loads(payload_str)
+            except json.JSONDecodeError: 
+                data = payload_str
+            
+            if len(topic_parts) > 2 and topic_parts[1] == 'sensor':
+                sensor_type = topic_parts[2]
+                if sensor_type == "bmp280" and isinstance(data, dict):
+                    measurement_name = "bmp280"
+                    if "temperature" in data: fields["temperature"] = float(data["temperature"])
+                    if "pressure" in data: fields["pressure"] = float(data["pressure"])
+                    if "pressure_sea_level" in data: fields["pressure_sea_level"] = float(data["pressure_sea_level"])
+                elif sensor_type == "dht11" and isinstance(data, dict):
+                    measurement_name = "dht11"
+                    if "temperature" in data: fields["temperature"] = float(data["temperature"])
+                    if "humidity" in data: fields["humidity"] = float(data["humidity"])
+                elif sensor_type == "mq135" and isinstance(data, dict):
+                    measurement_name = "mq135"
+                    if "adc_raw" in data: fields["adc_raw"] = int(data["adc_raw"])
+                    if "ppm" in data: fields["ppm"] = float(data["ppm"])
+                elif sensor_type == "ldr" and isinstance(data, dict):
+                    measurement_name = "ldr"
+                    if "ldr_raw" in data: fields["ldr_raw"] = int(data["ldr_raw"])
+            
+            elif len(topic_parts) == 4 and topic_parts[1] == 'gpio' and topic_parts[3] == 'state':
+                measurement_name = "gpio_state"
+                pin_num = topic_parts[2]
+                tags['pin'] = f"gpio{pin_num}"
+                fields["state"] = payload_str.upper()  # Store "ON" or "OFF" as string
+            
+            elif (len(topic_parts) == 3 and topic_parts[1] == "system" and topic_parts[2] == "status") or \
+                 (len(topic_parts) == 2 and topic_parts[1] == "status"):
+                measurement_name = "device_status"
+                fields["status"] = payload_str
 
-    json_body = []
-    current_time_utc = datetime.datetime.utcnow().isoformat() + "Z"
-    
-    try:
-        device_id = topic.split('/')[0]
-    except IndexError:
-        device_id = "unknown_device"
-        # logging.warning(f"Não foi possível determinar o device_id do tópico: {topic}")
+            if measurement_name and fields:
+                json_body = [{"measurement": measurement_name, "tags": tags, "time": datetime.datetime.utcnow().isoformat() + "Z", "fields": fields}]
+                self.influx_client.write_points(json_body)
+            else:
+                logging.warning(f"Nenhuma medição ou campo válido identificado para o tópico '{topic}'. Nenhum dado foi gravado.")
 
-    # A tag 'device_id' é comum a todos os dados.
-    tags = {"device_id": device_id}
-    
-    try:
-        data = json.loads(payload_str)
-    except json.JSONDecodeError:
-        data = payload_str
+        except Exception as e:
+            logging.error(f"Erro inesperado ao processar mensagem local de {topic}: {e}")
 
-    try:
-        measurement_name = None
-        fields = {} # Sempre começa com um dicionário de campos vazio
+    def on_cloud_message(self, client, userdata, msg):
+        """Processa comandos de gerenciamento de regras vindos do frontend."""
+        try:
+            payload = json.loads(msg.payload.decode())
+            command = payload.get("command")
+            
+            rules = self.get_rules()
+            if command == "add_rule":
+                new_rule = payload.get("rule")
+                new_rule['id'] = str(uuid.uuid4())
+                rules.append(new_rule)
+            elif command == "delete_rule":
+                rule_id_to_delete = payload.get("rule_id")
+                rules = [rule for rule in rules if rule.get('id') != rule_id_to_delete]
+            
+            self.save_rules(rules)
+            self.cloud_mqtt_client.publish(self.topic_list_rules, json.dumps(rules), qos=1)
+        except Exception as e:
+            logging.error(f"Erro ao processar comando da nuvem: {e}")
 
-        # --- Lógica de Análise de Dados Simplificada ---
-        
-        # ESP32_01: Sensor BMP280
-        if "sensor/bmp280" in topic and isinstance(data, dict):
-            measurement_name = "bmp280"
-            if "temperature" in data:
-                fields["temperature"] = float(data["temperature"])
-            if "pressure" in data:
-                fields["pressure"] = float(data["pressure"])
-            if "pressure_sea_level" in data:
-                fields["pressure_sea_level"] = float(data["pressure_sea_level"])
+    def get_rules(self):
+        try:
+            with open(self.rules_file, 'r') as f: return json.load(f)
+        except: return []
 
-        # ESP32_01: Sensor DHT11
-        elif "sensor/dht11" in topic and isinstance(data, dict):
-            measurement_name = "dht11"
-            if "temperature" in data:
-                fields["temperature"] = float(data["temperature"])
-            if "humidity" in data:
-                fields["humidity"] = float(data["humidity"])
+    def save_rules(self, rules):
+        with open(self.rules_file, 'w') as f: json.dump(rules, f, indent=4)
 
-        # ESP32_01: Sensor MQ135
-        elif "sensor/mq135" in topic and isinstance(data, dict):
-            measurement_name = "mq135"
-            if "adc_raw" in data:
-                fields["adc_raw"] = int(data["adc_raw"])
-            if "ppm" in data:
-                fields["ppm"] = float(data["ppm"])
+    def automation_loop(self):
+        """Loop principal da thread de automação e status."""
+        while True:
+            rules = self.get_rules()
+            if rules:
+                for rule in rules:
+                    try:
+                        aggregator = "last" if rule['measurement'] == "gpio_state" else "mean"
+                        query = f"SELECT {aggregator}(\"{rule['field']}\") FROM \"{rule['measurement']}\" WHERE time > now() - {rule['range']}"
+                        if rule.get('filter'): query += f" AND {rule['filter']}"
+                        
+                        result = self.influx_client.query(query)
+                        points = list(result.get_points())
+                        
+                        if points and points[0].get(aggregator) is not None:
+                            value, threshold, op = points[0][aggregator], float(rule["threshold"]), rule["operator"]
+                            if (op == ">" and value > threshold) or (op == "<" and value < threshold) or (op == "==" and value == threshold):
+                                self.cloud_mqtt_client.publish(rule['action_topic'], rule['action_payload'], qos=1)
+                    except Exception as e:
+                        logging.error(f"Erro ao executar a regra '{rule['name']}': {e}")
 
-        # ESP32_01: Sensor LDR
-        elif "sensor/ldr" in topic and isinstance(data, dict):
-            measurement_name = "ldr"
-            if "ldr_raw" in data:
-                fields["ldr_raw"] = int(data["ldr_raw"])
+            try:
+                status_data = {}
+                
+                def query_and_add(measurement, field, key, tag_filter="", is_gpio=False, round_digits=2, check_timeout=False):
+                    try:
+                        query = f"SELECT last(\"{field}\") FROM \"{measurement}\""
+                        if tag_filter:
+                            query += f" WHERE {tag_filter}"
+                        result = self.influx_client.query(query)
+                        points = list(result.get_points())
+                        if points and points[0].get('last') is not None:
+                            value = points[0]['last']
+                            if check_timeout:
+                                # Get timestamp of the last point
+                                last_time = points[0].get('time')
+                                last_time_dt = datetime.datetime.strptime(last_time, "%Y-%m-%dT%H:%M:%S.%fZ")
+                                time_diff = (datetime.datetime.utcnow() - last_time_dt).total_seconds()
+                                if time_diff > self.status_timeout:
+                                    status_data[key] = "offline"
+                                    return
+                            if is_gpio:
+                                status_data[key] = "ON" if value == "ON" else "OFF"
+                            elif isinstance(value, (int, float)):
+                                status_data[key] = round(value, round_digits)
+                            elif measurement == "device_status" and value in ["heartbeat", "online"]:
+                                status_data[key] = "online"
+                            else:
+                                status_data[key] = value
+                    except:
+                        pass
 
-        # ESP32_02: Estado do LED (GPIO)
-        elif "gpio/gpio2/state" in topic:
-            measurement_name = "gpio_state"
-            tags['pin'] = 'gpio2'
-            fields = {"state": str(payload_str).upper()}
+                # esp32_01 sensor and GPIO data
+                query_and_add("dht11", "temperature", "dht11_temperature", tag_filter="\"device_id\" = 'esp32_01'")
+                query_and_add("dht11", "humidity", "dht11_humidity", tag_filter="\"device_id\" = 'esp32_01'", round_digits=1)
+                query_and_add("bmp280", "temperature", "bmp280_temperature", tag_filter="\"device_id\" = 'esp32_01'")
+                query_and_add("bmp280", "pressure", "bmp280_pressure", tag_filter="\"device_id\" = 'esp32_01'")
+                query_and_add("bmp280", "pressure_sea_level", "bmp280_sea_level_pressure", tag_filter="\"device_id\" = 'esp32_01'")
+                query_and_add("mq135", "ppm", "mq135_ppm", tag_filter="\"device_id\" = 'esp32_01'")
+                query_and_add("ldr", "ldr_raw", "ldr_raw", tag_filter="\"device_id\" = 'esp32_01'", round_digits=0)
+                query_and_add("gpio_state", "state", "gpio_2_state", tag_filter="\"pin\" = 'gpio2' AND \"device_id\" = 'esp32_01'", is_gpio=True)
 
-        # Tópico de Status Genérico para todos os dispositivos
-        elif "/status" in topic:
-            measurement_name = "device_status"
-            fields = {"status": str(payload_str)}
+                # esp32_02 status (mapped to device_status for dashboard)
+                query_and_add("device_status", "status", "device_status", tag_filter="\"device_id\" = 'esp32_02'", check_timeout=True)
 
-        # Se um measurement foi identificado E o dicionário de campos não estiver vazio, envia os dados.
-        if measurement_name and fields:
-            json_body.append({
-                "measurement": measurement_name,
-                "tags": tags,
-                "time": current_time_utc,
-                "fields": fields
-            })
-            influx_client_global.write_points(json_body)
-            # logging.info(f"Dados do tópico '{topic}' gravados na medição '{measurement_name}' do InfluxDB.")
+                if status_data:
+                    status_data['last_update'] = datetime.datetime.now().isoformat()
+                    self.cloud_mqtt_client.publish(self.topic_dashboard_status, json.dumps(status_data), qos=1)
+                    logging.info(f"Status publicado para o dashboard: {status_data}")
 
-    except (ValueError, TypeError):
-        pass # logging.error(f"Erro ao processar mensagem do tópico {topic}: {e}. Payload: {payload_str}")
-    except Exception:
-        pass # logging.error(f"Um erro inesperado ocorreu ao processar a mensagem de {topic}: {e}")
+            except Exception as e:
+                logging.error(f"Erro ao publicar status periódico completo: {e}")
 
+            time.sleep(self.check_interval)
 
-def setup_mqtt_client():
-    """Configura e conecta o cliente MQTT."""
-    if not MQTT_BROKER_HOST:
-        # logging.critical("MQTT_BROKER_HOST não está definido. Verifique seu arquivo .env.")
-        return None
-    
-    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
-    if MQTT_USERNAME and MQTT_PASSWORD:
-        client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
-    
-    client.on_connect = on_connect
-    client.on_message = on_message
-    
-    try:
-        client.connect(MQTT_BROKER_HOST, MQTT_BROKER_PORT, 60)
-        return client
-    except Exception:
-        # logging.error(f"Não foi possível conectar ao Broker MQTT: {e}")
-        return None
+    def run(self):
+        """Inicia todos os loops e threads."""
+        self.local_mqtt_client.loop_start()
+        self.cloud_mqtt_client.loop_start()
 
-def setup_influxdb_client():
-    """Configura o cliente InfluxDB e garante que o banco de dados exista."""
-    global influx_client_global
-    if not INFLUXDB_HOST:
-        # logging.critical("INFLUXDB_HOST não está definido. Verifique seu arquivo .env.")
-        return False
-    
-    try:
-        # logging.info(f"Conectando ao InfluxDB em {INFLUXDB_HOST}:{INFLUXDB_PORT}...")
-        influx_client_global = InfluxDBClient(
-            host=INFLUXDB_HOST,
-            port=INFLUXDB_PORT,
-            username=INFLUXDB_USERNAME,
-            password=INFLUXDB_PASSWORD,
-            database=INFLUXDB_DATABASE
-        )
-        
-        databases = influx_client_global.get_list_database()
-        if {"name": INFLUXDB_DATABASE} not in databases:
-            # logging.warning(f"Banco de dados '{INFLUXDB_DATABASE}' não encontrado. Criando agora...")
-            influx_client_global.create_database(INFLUXDB_DATABASE)
-            # logging.info(f"Banco de dados '{INFLUXDB_DATABASE}' criado com sucesso.")
-        
-        # logging.info("Conectado com sucesso ao InfluxDB.")
-        return True
-    except Exception:
-        # logging.error(f"Não foi possível conectar ou configurar o InfluxDB: {e}")
-        return False
+        automation_thread = threading.Thread(target=self.automation_loop, name="AutomationThread", daemon=True)
+        automation_thread.start()
+
+        logging.info("Gateway IoT em execução. Pressione Ctrl+C para parar.")
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            logging.info("Desligando o Gateway IoT...")
+            self.local_mqtt_client.loop_stop()
+            self.cloud_mqtt_client.loop_stop()
+            logging.info("Gateway desligado.")
 
 if __name__ == '__main__':
-    # logging.info("Iniciando serviço MQTT-para-InfluxDB...")
-    
-    if not setup_influxdb_client():
-        # logging.critical("Saindo: Falha na configuração do InfluxDB.")
-        exit(1)
-        
-    mqtt_client = setup_mqtt_client()
-    if not mqtt_client:
-        # logging.critical("Saindo: Falha na configuração do MQTT.")
-        exit(1)
-        
-    mqtt_client.loop_start()
-    # logging.info("Serviço em execução. Pressione Ctrl+C para parar.")
-    
-    try:
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        pass # logging.info("Serviço interrompido pelo usuário.")
-    finally:
-        mqtt_client.loop_stop()
-        mqtt_client.disconnect()
-        influx_client_global.close()
-        # logging.info("Serviço parado e clientes desconectados.")
+    gateway = IoTGateway()
+    gateway.run()
